@@ -1,0 +1,9 @@
+# Manifeste de mise à jour Heivoli Home
+# À publier à l'adresse UPDATE_MANIFEST_URL (source/config.h).
+# Génère-le avec : python3 tools/make_manifest.py 0.2.0 <url_de_base>
+version=0.2.0
+3dsx=https://heivoli.example/3ds/heivoli-home.3dsx
+sha256_3dsx=
+cia=https://heivoli.example/3ds/heivoli-home.cia
+sha256_cia=
+notes=Exemple : nouveau thème Aero, lancement des homebrews.

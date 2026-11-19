@@ -1,0 +1,4 @@
+Mets ici le fichier cacert.pem (certificats racine pour le HTTPS).
+Téléchargement : https://curl.se/ca/cacert.pem
+Sans lui, la mise à jour par Wi-Fi refusera de se connecter au serveur.
+Le dossier gfx/ est généré automatiquement à la compilation.

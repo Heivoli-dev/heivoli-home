@@ -1,0 +1,21 @@
+--atlas -f rgba8888 -z auto
+logo.png
+ic_pad.png
+ic_chat.png
+ic_photo.png
+ic_users.png
+ic_globe.png
+ic_update.png
+ic_gear.png
+ic_home.png
+ic_theme.png
+ic_sound.png
+ic_power.png
+ic_list.png
+ic_account.png
+ic_info.png
+ic_shop.png
+ic_music.png
+ic_swap.png
+ic_bell.png
+ic_camera.png

@@ -1,0 +1,11 @@
+build/
+*.3dsx
+*.elf
+*.smdh
+*.cia
+*.zip
+romfs/cacert.pem
+romfs/gfx/
+installer/romfs/
+tools/bin/
+.DS_Store

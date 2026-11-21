@@ -1,0 +1,14 @@
+shell
+shell_dark
+hinge
+bezel
+pad
+btn_a
+btn_b
+btn_x
+btn_y
+phone
+phone_edge
+white
+mint
+peach

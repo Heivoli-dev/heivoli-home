@@ -13,3 +13,7 @@ tools/bin/
 # Versions publiées (lues par les consoles)
 !releases/
 !releases/**
+
+capture/banner/.tools/
+capture/banner/*.cgfx
+capture/banner/*.bnr

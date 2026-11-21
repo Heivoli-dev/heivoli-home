@@ -115,10 +115,12 @@ def node(name, parent, mesh=None, t=(0, 0, 0), r=(0, 0, 0, 1), s=(1, 1, 1)):
     SCENE.append({"name": name, "parent": parent, "mesh": mesh, "t": t, "r": r, "s": s})
 
 
-def build_scene():
-    node("Diorama", None)                       # racine, cadrée sur la caméra
-    node("Scene", "Diorama", t=(-3.0, -5.0, 0))  # recentre la scène
-    # --- la console ---
+MODEL_JSON = os.path.join(HERE, "model", "console.json")
+QR_START = [0.0, 1.2, 0.2]   # point de départ du QR (centre de l'écran du bas), mis à jour par le modèle
+
+
+def add_box_console():
+    """Console simplifiée en pavés (si le modèle 3D n'est pas là)."""
     node("Base", "Scene", (box(13, 1.0, 7.4, "shell"), "palette.png"), t=(0, 0.5, 0))
     node("BottomScreen", "Scene", (quad(6.6, 5.0, "y"), "screen_bottom.png"), t=(0, 1.02, 0.2))
     node("Pad", "Scene", (box(1.6, 0.35, 1.6, "pad"), "palette.png"), t=(-4.9, 1.15, 0.6))
@@ -132,12 +134,52 @@ def build_scene():
     node("TopBezel", "Lid", (box(10.6, 6.4, 0.1, "bezel"), "palette.png"), t=(0, 4.0, 0.38))
     node("TopScreen", "Lid", (quad(9.6, 5.6, "z"), "screen_top.png"), t=(0, 4.0, 0.45))
     node("LidLogo", "Lid", (quad(1.0, 1.0, "z"), "lid_logo.png"), t=(-5.8, 0.75, 0.38))
+
+
+def add_model_console():
+    """Modèle 3DS (Sketchfab, CC-BY 4.0, voir import_model.py), réorienté et mis à l'échelle."""
+    d = json.load(open(MODEL_JSON))
+    lo, hi = d["bbox"]
+    width = hi[2] - lo[2]                      # la largeur du modèle est sur son axe Z
+    k = 13.0 / width                           # même largeur que l'ancienne console
+    cx, cz = (lo[0] + hi[0]) / 2, (lo[2] + hi[2]) / 2
+    # modèle -> scène : X = z, Y = y, Z = -x (face avant vers la caméra), base posée sur y = 0
+    def conv(p):
+        return ((p[2] - cz) * k, (p[1] - lo[1]) * k, -(p[0] - cx) * k)
+
+    def convn(n):
+        return (n[2], n[1], -n[0])
+
+    node("Console", "Scene")
+    for i, part in enumerate(d["parts"]):
+        pos = [conv(p) for p in part["P"]]
+        nrm = [convn(n) for n in part["N"]]
+        if part["color"] == "SCREENS":
+            mesh = ((pos, nrm, [tuple(u) for u in part["U"]], part["I"]), "screens.png")
+        else:
+            u, v = swatch_uv(part["color"])
+            mesh = ((pos, nrm, [(u, v)] * len(pos), part["I"]), "palette.png")
+        node("Console_%02d" % i, "Console", mesh)
+    # départ du QR : juste au-dessus du centre de l'écran du bas (la plus basse des deux zones d'écran)
+    bottom = min(d["screens"], key=lambda sc: sc["center"][1])
+    c = conv(bottom["center"])
+    QR_START[:] = [c[0], c[1] + 0.3, c[2]]
+
+
+def build_scene():
+    node("Diorama", None)                       # racine, cadrée sur la caméra
+    node("Scene", "Diorama", t=(-3.0, -5.0, 0))  # recentre la scène
+    # --- la console ---
+    if os.path.exists(MODEL_JSON):
+        add_model_console()
+    else:
+        add_box_console()
     # --- le téléphone qui reçoit la capture ---
     node("Phone", "Scene", t=(11.0, 6.0, 1.0), r=qaxis((0, 1, 0), -22))
     node("PhoneBody", "Phone", (box(3.6, 7.0, 0.5, "phone_edge"), "palette.png"))
     node("PhoneScreen", "Phone", (quad(3.2, 6.4, "z"), "screen_phone.png"), t=(0, 0, 0.26))
     # --- le QR code qui s'envole ---
-    node("QRCard", "Scene", (quad(2.4, 2.4, "z"), "qr.png"), t=(0, 1.2, 0.2), s=(0.01, 0.01, 0.01))
+    node("QRCard", "Scene", (quad(2.4, 2.4, "z"), "qr.png"), t=tuple(QR_START), s=(0.01, 0.01, 0.01))
 
 
 def smooth(a, b, k):
@@ -155,16 +197,16 @@ def animate(name, t):
         hop = 0.5 * math.sin(math.pi * (t - 2.3) / 0.4) if 2.3 <= t <= 2.7 else 0.0
         return (11.0, 6.0 + bob + hop, 1.0), r, (1, 1, 1)
     if name == "QRCard":
-        start, end = (0.0, 1.2, 0.2), (11.0, 6.0, 1.6)
+        start, end = tuple(QR_START), (11.0, 6.0, 1.6)
         if t < 0.3:  # sort de l'écran du bas
             k = t / 0.3
-            return (0.0, smooth(1.2, 2.2, k), 0.2), qaxis((1, 0, 0), -90 * (1 - k)), (k, k, k)
+            return (start[0], smooth(start[1], start[1] + 1.0, k), start[2]), qaxis((1, 0, 0), -90 * (1 - k)), (k, k, k)
         if t < 2.3:  # vole en arc en tournant
             k = (t - 0.3) / 2.0
             e = smooth(0, 1, k)
             x = start[0] + (end[0] - start[0]) * e
             z = start[2] + (end[2] - start[2]) * e
-            y = smooth(2.2, end[1], k) + 3.5 * math.sin(math.pi * e)
+            y = smooth(start[1] + 1.0, end[1], k) + 3.5 * math.sin(math.pi * e)
             return (x, y, z), qaxis((0, 1, 0), 720 * e), (1, 1, 1)
         if t < 2.5:  # entre dans le téléphone
             k = 1 - (t - 2.3) / 0.2

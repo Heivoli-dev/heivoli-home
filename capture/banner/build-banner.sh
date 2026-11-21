@@ -18,10 +18,15 @@ fi
 if [ ! -x "$TOOLS/venv/bin/python" ]; then
   echo "Préparation de Python (gltflib, Pillow)..."
   python3 -m venv "$TOOLS/venv"
-  "$TOOLS/venv/bin/pip" install -q gltflib pillow
+  "$TOOLS/venv/bin/pip" install -q gltflib pillow numpy
 fi
 PY="$TOOLS/venv/bin/python"
 
+if [ -f model/scene.gltf ] && [ ! -f model/console.json ]; then
+  echo "0/3 Import du modèle 3DS (simplification + couleurs)"
+  "$PY" -m pip install -q numpy >/dev/null
+  "$PY" import_model.py
+fi
 echo "1/3 Scène glTF cadrée sur la caméra du menu HOME"
 "$PY" make_banner.py --camera "$TOOLS/pycgfx/banner-camera.gltf"
 

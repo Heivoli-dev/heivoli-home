@@ -1,0 +1,47 @@
+# Compile Hn screen ! (.3dsx + .cia) à chaque envoi qui touche hn-screen/.
+# Les fichiers sont à récupérer dans l'onglet Actions (artefact « hn-screen »).
+name: Hn screen !
+
+on:
+  push:
+    branches: [main]
+    paths: ["hn-screen/**", ".github/workflows/hn-screen.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkitarm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dépendances
+        run: |
+          PKGS="3ds-curl 3ds-mbedtls 3ds-zlib"
+          if dkp-pacman -Q $PKGS; then exit 0; fi
+          for i in 1 2 3; do
+            dkp-pacman -Sy --noconfirm --needed $PKGS && exit 0
+            echo "Serveur devkitPro indisponible, nouvel essai dans 30 s..."; sleep 30
+          done
+          exit 1
+
+      - name: Outils CIA et certificats
+        run: |
+          curl -fsSL -o /tmp/makerom.zip https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.18.4/makerom-v0.18.4-ubuntu_x86_64.zip
+          command -v unzip >/dev/null || (apt-get update -qq && apt-get install -y -qq unzip)
+          mkdir -p /tmp/bin && cd /tmp/bin && unzip -o /tmp/makerom.zip && chmod +x makerom
+          curl -fsSL -o "$GITHUB_WORKSPACE/hn-screen/romfs/cacert.pem" https://curl.se/ca/cacert.pem
+
+      - name: Compilation
+        run: |
+          export PATH=/tmp/bin:$PATH
+          make -C hn-screen -j2
+          make -C hn-screen cia
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hn-screen
+          path: |
+            hn-screen/hn-screen.cia
+            hn-screen/hn-screen.3dsx

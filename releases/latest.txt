@@ -1,0 +1,4 @@
+version=0.3.1
+3dsx=https://raw.githubusercontent.com/Heivoli-dev/heivoli-home/main/releases/v0.3.1/heivoli-home.3dsx
+sha256_3dsx=0366a21d75be10779e80c97a74a43064245e41739f78f7786462a6869ed51747
+notes=Lancement des applis corrigé, homebrews séparés des jeux 3DS (X pour corriger), redémarrage complet, mises à jour via GitHub.

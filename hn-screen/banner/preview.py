@@ -80,9 +80,9 @@ def render(g, blob, t, texcache):
         Pw = (M @ np.c_[P, np.ones(len(P))].T).T[:, :3]
         Nw = (M[:3, :3] @ N.T).T
         Nw /= np.linalg.norm(Nw, axis=1, keepdims=True) + 1e-9
-        z = -Pw[:, 2] + 40  # caméra par défaut à z=+40
+        z = -Pw[:, 2] + 44.786  # caméra du menu HOME : (0, 1, 44.786)
         sx = (Pw[:, 0] / z * f * (H / 2)) + W / 2
-        sy = H / 2 - (Pw[:, 1] / z * f * (H / 2))
+        sy = H / 2 - ((Pw[:, 1] - 1.0) / z * f * (H / 2))
         for k in range(0, len(I), 3):
             a, b, c = I[k:k + 3]
             nrm = Nw[a]

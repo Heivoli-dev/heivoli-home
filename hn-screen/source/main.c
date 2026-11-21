@@ -421,6 +421,8 @@ static void draw_bottom_album(void)
             ui_rrect(c->x - 3, y - 3, TH_W + 6, TH_H + 6, 5, C_BORDER);
             ui_rrect(c->x - 2, y - 2, TH_W + 4, TH_H + 4, 4, C_WHITE);
         }
+        s->thumb.img.tex = &s->thumb.tex;
+        s->thumb.img.subtex = &s->thumb.sub;
         if (s->thumbState == 1) C2D_DrawImageAt(s->thumb.img, c->x, y, 0.6f, NULL, TH_W / (float)THUMB_W, TH_H / (float)THUMB_H);
         else ui_rect(c->x, y, TH_W, TH_H, C_PLACE);
     }

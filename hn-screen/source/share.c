@@ -206,7 +206,7 @@ static bool start_server(void)
     snprintf(S.url, sizeof(S.url), "http://%s:%d/", inet_ntoa(ip), LOCAL_PORT);
     snprintf(S.label, sizeof(S.label), "%s:%d", inet_ntoa(ip), LOCAL_PORT);
     S.stop = false;
-    S.thread = threadCreate(server_thread, NULL, 32 * 1024, 0x31, -1, false);
+    S.thread = threadCreate(server_thread, NULL, 64 * 1024, 0x31, -1, false);
     if (!S.thread) return false;
     S.threadRunning = true;
     S.state = SHARE_LOCAL;
@@ -344,7 +344,7 @@ bool share_start(const char *topPath, const char *botPath, bool localOnly)
     }
     S.state = SHARE_SENDING;
     S.stop = false;
-    S.thread = threadCreate(upload_thread, NULL, 128 * 1024, 0x31, -1, false);
+    S.thread = threadCreate(upload_thread, NULL, 512 * 1024, 0x31, -1, false);
     if (!S.thread) {
         share_go_local();
         return S.state == SHARE_LOCAL;

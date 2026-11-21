@@ -286,9 +286,13 @@ def animate(name, t):
     """Pose (T, R, S) d'un nœud animé à l'instant t (secondes, 0..LOOP)."""
     dt = t - CLICK
     if name == "Camera":
-        yaw = 22 * math.sin(t / LOOP * 2 * math.pi)
-        tilt = 4 * math.sin(t / LOOP * 4 * math.pi)
-        return (0, 0, 0), qmul(qaxis((0, 1, 0), yaw), qaxis((1, 0, 0), tilt)), (1, 1, 1)
+        # de face pour le clic, puis un tour complet sur lui-même autour de son centre
+        start = CLICK + 0.7
+        if t < start:
+            return (0, 0.12 * math.sin(t / start * 2 * math.pi), 0), (0, 0, 0, 1), (1, 1, 1)
+        k = (t - start) / (LOOP - start)
+        k = k * k * (3 - 2 * k)
+        return (0, 0, 0), qaxis((0, 1, 0), 360.0 * k), (1, 1, 1)
     if name == "Squash":
         if 0 <= dt < 0.45:  # écrasé puis rebond
             k = dt / 0.45
@@ -327,22 +331,20 @@ def animate(name, t):
 
 
 def fit_to_camera(camera_path):
-    cam_t, cam_r, yfov = (0.0, 0.0, 40.0), (0, 0, 0, 1), math.radians(30)
+    """Place la scène au centre de l'image du menu HOME.
+
+    La caméra du menu HOME est en (0, 1, 44.8) et regarde vers -Z (champ vertical 30°,
+    plan proche à 26.5) : à l'origine, l'image fait ±12 unités de haut. On laisse donc la
+    scène à l'origine, à une échelle qui la fait remplir l'image sans être coupée."""
+    cam_y = 1.0
     if camera_path:
         g = json.load(open(camera_path))
-        cams = g.get("cameras", [])
         for n in g.get("nodes", []):
             if "camera" in n:
-                cam_t = tuple(n.get("translation", (0, 0, 0)))
-                cam_r = tuple(n.get("rotation", (0, 0, 0, 1)))
-                yfov = cams[n["camera"]].get("perspective", {}).get("yfov", yfov)
+                cam_y = n.get("translation", (0, 1, 0))[1]
                 break
-    fwd = qrot(cam_r, (0, 0, -1))
-    radius = 5.0  # demi-hauteur de la scène, photo comprise
-    dist = radius / math.tan(yfov / 2) * 1.12
-    center = tuple(cam_t[i] + fwd[i] * dist for i in range(3))
-    rot = qmul(cam_r, qaxis((1, 0, 0), 10))  # vue très légèrement plongeante
-    return center, rot, (1, 1, 1)
+    scale = 2.1  # l'appareil remplit bien l'image, la photo reste dans le cadre
+    return (0.0, cam_y + 1.2, 0.0), qaxis((1, 0, 0), 12), (scale, scale, scale)
 
 
 # ---------------------------------------------------------------------------

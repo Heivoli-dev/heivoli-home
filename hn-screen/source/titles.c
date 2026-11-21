@@ -113,6 +113,11 @@ int titles_load(Title **out)
     }
     free(smdh);
     if (n) qsort(list, n, sizeof(Title), cmp_title);
+    // les entrées ont bougé (realloc, tri) : on refait pointer chaque image vers sa texture
+    for (int i = 0; i < n; i++) {
+        list[i].icon.img.tex = &list[i].icon.tex;
+        list[i].icon.img.subtex = &list[i].icon.sub;
+    }
     *out = list;
     return n;
 }

@@ -1,7 +1,10 @@
-# Bannière 3D « diorama » — appli de captures
+# Bannière 3D « l'appareil photo vivant » — appli de captures
 
-Une petite 3DS ouverte : une capture sur l'écran du haut, un QR code qui s'envole de
-l'écran du bas vers un téléphone qui flotte à côté. Boucle de 4 s + jingle (clic-clac et 4 notes).
+Un appareil photo rond et brillant (crème, bande corail, objectif bleuté, flash jaune) qui
+tourne doucement. Au « clic » : le déclencheur s'enfonce, l'appareil s'écrase un peu, le flash
+éclate et une photo sort par le dessus. Boucle de 5 s + jingle (clic-clac et 4 notes).
+
+L'ancien concept « diorama » (3DS + QR code + téléphone) reste dans `make_banner_diorama.py`.
 
 - `import_model.py` : importe le modèle 3DS (`model/`), le simplifie (~5 200 triangles) et le recolore
 - `make_banner.py` : génère la scène et l'animation (`banner.gltf` + `banner.bin`)

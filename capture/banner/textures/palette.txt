@@ -12,3 +12,12 @@ phone_edge
 white
 mint
 peach
+cream
+coral
+coral_dark
+lens_dark
+lens_ring
+glass
+glass_light
+flash
+flash_glow

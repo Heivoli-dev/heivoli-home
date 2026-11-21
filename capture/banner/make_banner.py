@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
-"""Bannière 3D « diorama » de l'appli de captures (menu HOME de la 3DS).
+"""Bannière 3D « l'appareil photo vivant » (menu HOME de la 3DS).
 
-Une petite 3DS ouverte : une capture sur l'écran du haut, un QR code sur l'écran
-du bas qui s'envole vers un téléphone flottant, qui la reçoit. Boucle de 4 s.
+Un appareil photo rond et brillant (crème, bande corail, gros objectif bleuté,
+flash jaune) tourne doucement. Toutes les quelques secondes : le déclencheur
+s'enfonce, l'appareil s'écrase un peu (effet dessin animé), le flash éclate et
+une petite photo sort par le dessus. Boucle de 5 s.
 
-Écrit banner.gltf (+ banner.bin) à côté de ce script, avec la bibliothèque
-standard uniquement. Règles suivies pour ne pas figer le menu HOME : animation
-rigide (translation / rotation / échelle de nœuds), nœuds nommés, pas de
-transparence, textures petites (puissances de 2), scène cadrée dans la zone sûre.
+Écrit banner.gltf (+ banner.bin) avec la bibliothèque standard uniquement.
+Règles suivies pour ne pas figer le menu HOME : animation rigide (translation /
+rotation / échelle de nœuds nommés), pas de transparence, petites textures,
+scène cadrée dans la zone sûre.
 
 Usage :
-    python3 make_banner.py                         # caméra par défaut
+    python3 make_banner.py                               # caméra par défaut
     python3 make_banner.py --camera banner-camera.gltf   # caméra du menu HOME (pycgfx)
+
+(L'ancien concept « diorama » est dans make_banner_diorama.py.)
 """
 import argparse
 import json
@@ -21,7 +25,8 @@ import struct
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FPS = 15
-LOOP = 4.0
+LOOP = 5.0
+CLICK = 2.0  # instant du « clic » dans la boucle
 
 # ---------------------------------------------------------------------------
 # Maths (quaternions x, y, z, w comme glTF)
@@ -45,7 +50,6 @@ def qaxis(axis, deg):
 def qrot(q, v):
     x, y, z, w = q
     vx, vy, vz = v
-    # v' = q v q*
     ix = w * vx + y * vz - z * vy
     iy = w * vy + z * vx - x * vz
     iz = w * vz + x * vy - y * vx
@@ -53,6 +57,23 @@ def qrot(q, v):
     return (ix * w + iw * -x + iy * -z - iz * -y,
             iy * w + iw * -y + iz * -x - ix * -z,
             iz * w + iw * -z + ix * -y - iy * -x)
+
+
+def sub(a, b):
+    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+
+def cross(a, b):
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+
+def dot(a, b):
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def norm(v):
+    n = math.sqrt(dot(v, v)) or 1.0
+    return (v[0] / n, v[1] / n, v[2] / n)
 
 
 # ---------------------------------------------------------------------------
@@ -66,47 +87,146 @@ def swatch_uv(name):
     return (((i % 8) * 8 + 4) / 64.0, ((i // 8) * 8 + 4) / 64.0)
 
 
+def fix_winding(pos, nrm, idx):
+    """Oriente chaque triangle vers l'extérieur (d'après les normales)."""
+    out = []
+    for k in range(0, len(idx), 3):
+        a, b, c = idx[k:k + 3]
+        fn = cross(sub(pos[b], pos[a]), sub(pos[c], pos[a]))
+        avg = tuple(nrm[a][i] + nrm[b][i] + nrm[c][i] for i in range(3))
+        out += [a, b, c] if dot(fn, avg) >= 0 else [a, c, b]
+    return out
+
+
+def colored(pos, nrm, idx, color):
+    u, v = swatch_uv(color)
+    return pos, nrm, [(u, v)] * len(pos), fix_winding(pos, nrm, idx)
+
+
+def _f(w, e):
+    return math.copysign(abs(w) ** e, w)
+
+
+def superellipsoid(a, b, c, e, color, center=(0, 0, 0), lat=14, lon=28, theta=(-90, 90)):
+    """Forme « savon » arrondie (e petit = presque un cube aux coins ronds)."""
+    cx, cy, cz = center
+    pos, nrm, idx = [], [], []
+    t0, t1 = math.radians(theta[0]), math.radians(theta[1])
+    for i in range(lat + 1):
+        th = t0 + (t1 - t0) * i / lat
+        for j in range(lon + 1):
+            ph = -math.pi + 2 * math.pi * j / lon
+            ct, st, cp, sp = math.cos(th), math.sin(th), math.cos(ph), math.sin(ph)
+            pos.append((cx + a * _f(ct, e) * _f(cp, e), cy + b * _f(st, e), cz + c * _f(ct, e) * _f(sp, e)))
+            nrm.append(norm((_f(ct, 2 - e) * _f(cp, 2 - e) / a, _f(st, 2 - e) / b, _f(ct, 2 - e) * _f(sp, 2 - e) / c)))
+    w = lon + 1
+    for i in range(lat):
+        for j in range(lon):
+            p = i * w + j
+            idx += [p, p + 1, p + w + 1, p, p + w + 1, p + w]
+    return colored(pos, nrm, idx, color)
+
+
+def cylinder(r, z0, z1, color, center=(0, 0), seg=28, caps=(True, True), axis="z"):
+    """Cylindre le long de Z (ou Y), avec couvercles."""
+    cx, cy = center
+    pos, nrm, idx = [], [], []
+
+    def P(x, y, z):
+        return (cx + x, cy + y, z) if axis == "z" else (cx + x, z, cy + y)
+
+    def Nv(x, y, z):
+        return (x, y, z) if axis == "z" else (x, z, y)
+
+    for zz in (z0, z1):
+        for j in range(seg + 1):
+            ang = 2 * math.pi * j / seg
+            pos.append(P(r * math.cos(ang), r * math.sin(ang), zz))
+            nrm.append(Nv(math.cos(ang), math.sin(ang), 0))
+    w = seg + 1
+    for j in range(seg):
+        idx += [j, j + 1, w + j + 1, j, w + j + 1, w + j]
+    for k, (zz, on) in enumerate(((z0, caps[0]), (z1, caps[1]))):
+        if not on:
+            continue
+        s = -1 if k == 0 else 1
+        c0 = len(pos)
+        pos.append(P(0, 0, zz))
+        nrm.append(Nv(0, 0, s))
+        for j in range(seg + 1):
+            ang = 2 * math.pi * j / seg
+            pos.append(P(r * math.cos(ang), r * math.sin(ang), zz))
+            nrm.append(Nv(0, 0, s))
+        for j in range(seg):
+            idx += [c0, c0 + 1 + j, c0 + 2 + j]
+    return colored(pos, nrm, idx, color)
+
+
+def torus(R, r, z, color, seg=28, rings=10):
+    """Anneau (bague d'objectif) autour de l'axe Z."""
+    pos, nrm, idx = [], [], []
+    for i in range(seg + 1):
+        u = 2 * math.pi * i / seg
+        for j in range(rings + 1):
+            v = 2 * math.pi * j / rings
+            n = (math.cos(v) * math.cos(u), math.cos(v) * math.sin(u), math.sin(v))
+            pos.append(((R + r * math.cos(v)) * math.cos(u), (R + r * math.cos(v)) * math.sin(u), z + r * math.sin(v)))
+            nrm.append(n)
+    w = rings + 1
+    for i in range(seg):
+        for j in range(rings):
+            p = i * w + j
+            idx += [p, p + w, p + w + 1, p, p + w + 1, p + 1]
+    return colored(pos, nrm, idx, color)
+
+
 def box(w, h, d, color, center=(0, 0, 0)):
-    """Pavé coloré (uv au centre d'une case de la palette)."""
     cx, cy, cz = center
     x, y, z = w / 2, h / 2, d / 2
-    u, v = swatch_uv(color)
-    faces = [  # normale, 4 coins
-        ((0, 0, 1), [(-x, -y, z), (x, -y, z), (x, y, z), (-x, y, z)]),
-        ((0, 0, -1), [(x, -y, -z), (-x, -y, -z), (-x, y, -z), (x, y, -z)]),
-        ((1, 0, 0), [(x, -y, z), (x, -y, -z), (x, y, -z), (x, y, z)]),
-        ((-1, 0, 0), [(-x, -y, -z), (-x, -y, z), (-x, y, z), (-x, y, -z)]),
-        ((0, 1, 0), [(-x, y, z), (x, y, z), (x, y, -z), (-x, y, -z)]),
-        ((0, -1, 0), [(-x, -y, -z), (x, -y, -z), (x, -y, z), (-x, -y, z)]),
-    ]
-    pos, nrm, uv, idx = [], [], [], []
-    for n, quad in faces:
+    faces = [((0, 0, 1), [(-x, -y, z), (x, -y, z), (x, y, z), (-x, y, z)]),
+             ((0, 0, -1), [(x, -y, -z), (-x, -y, -z), (-x, y, -z), (x, y, -z)]),
+             ((1, 0, 0), [(x, -y, z), (x, -y, -z), (x, y, -z), (x, y, z)]),
+             ((-1, 0, 0), [(-x, -y, -z), (-x, -y, z), (-x, y, z), (-x, y, -z)]),
+             ((0, 1, 0), [(-x, y, z), (x, y, z), (x, y, -z), (-x, y, -z)]),
+             ((0, -1, 0), [(-x, -y, -z), (x, -y, -z), (x, -y, z), (-x, -y, z)])]
+    pos, nrm, idx = [], [], []
+    for n, q in faces:
         b = len(pos)
-        for p in quad:
+        for p in q:
             pos.append((p[0] + cx, p[1] + cy, p[2] + cz))
             nrm.append(n)
-            uv.append((u, v))
         idx += [b, b + 1, b + 2, b, b + 2, b + 3]
-    return pos, nrm, uv, idx
+    return colored(pos, nrm, idx, color)
 
 
-def quad(w, h, normal="z", center=(0, 0, 0)):
-    """Rectangle texturé entier. normal='z' (face +Z) ou 'y' (face +Y)."""
+def quad(w, h, center=(0, 0, 0)):
+    """Rectangle texturé face +Z."""
     cx, cy, cz = center
     x, y = w / 2, h / 2
-    if normal == "z":
-        pts = [(-x, -y, 0), (x, -y, 0), (x, y, 0), (-x, y, 0)]
-        n = (0, 0, 1)
-    else:  # posé à plat, le haut de la texture vers -Z (vers le fond)
-        pts = [(-x, 0, y), (x, 0, y), (x, 0, -y), (-x, 0, -y)]
-        n = (0, 1, 0)
-    pos = [(p[0] + cx, p[1] + cy, p[2] + cz) for p in pts]
-    uv = [(0, 1), (1, 1), (1, 0), (0, 0)]
-    return pos, [n] * 4, uv, [0, 1, 2, 0, 2, 3]
+    pos = [(cx - x, cy - y, cz), (cx + x, cy - y, cz), (cx + x, cy + y, cz), (cx - x, cy + y, cz)]
+    return pos, [(0, 0, 1)] * 4, [(0, 1), (1, 1), (1, 0), (0, 0)], [0, 1, 2, 0, 2, 3]
+
+
+def star(r_out, r_in, z, color, points=8):
+    """Étoile plate (éclat du flash), visible des deux côtés."""
+    pos, nrm, idx = [(0, 0, z)], [(0, 0, 1)], []
+    for k in range(points * 2 + 1):
+        ang = math.pi / 2 + math.pi * k / points
+        r = r_out if k % 2 == 0 else r_in
+        pos.append((r * math.cos(ang), r * math.sin(ang), z))
+        nrm.append((0, 0, 1))
+    for k in range(points * 2):
+        idx += [0, k + 1, k + 2]
+    u, v = swatch_uv(color)
+    back = len(pos)
+    pos += [p for p in pos]
+    nrm += [(0, 0, -1)] * back
+    idx += [i + back for k in range(0, len(idx), 3) for i in (idx[k], idx[k + 2], idx[k + 1])]
+    return pos, nrm, [(u, v)] * len(pos), idx
 
 
 # ---------------------------------------------------------------------------
-# Scène : (nom, parent, mesh(mesh_fn, texture) ou None, T, R, S)
+# Scène : (nom, parent, mesh(geom, texture) ou None, T, R, S)
 
 SCENE = []
 
@@ -115,71 +235,39 @@ def node(name, parent, mesh=None, t=(0, 0, 0), r=(0, 0, 0, 1), s=(1, 1, 1)):
     SCENE.append({"name": name, "parent": parent, "mesh": mesh, "t": t, "r": r, "s": s})
 
 
-MODEL_JSON = os.path.join(HERE, "model", "console.json")
-QR_START = [0.0, 1.2, 0.2]   # point de départ du QR (centre de l'écran du bas), mis à jour par le modèle
-
-
-def add_box_console():
-    """Console simplifiée en pavés (si le modèle 3D n'est pas là)."""
-    node("Base", "Scene", (box(13, 1.0, 7.4, "shell"), "palette.png"), t=(0, 0.5, 0))
-    node("BottomScreen", "Scene", (quad(6.6, 5.0, "y"), "screen_bottom.png"), t=(0, 1.02, 0.2))
-    node("Pad", "Scene", (box(1.6, 0.35, 1.6, "pad"), "palette.png"), t=(-4.9, 1.15, 0.6))
-    node("BtnA", "Scene", (box(0.7, 0.35, 0.7, "btn_a"), "palette.png"), t=(5.6, 1.15, 0.6))
-    node("BtnB", "Scene", (box(0.7, 0.35, 0.7, "btn_b"), "palette.png"), t=(4.9, 1.15, 1.3))
-    node("BtnX", "Scene", (box(0.7, 0.35, 0.7, "btn_x"), "palette.png"), t=(4.9, 1.15, -0.1))
-    node("BtnY", "Scene", (box(0.7, 0.35, 0.7, "btn_y"), "palette.png"), t=(4.2, 1.15, 0.6))
-    node("Hinge", "Scene", (box(13, 1.0, 1.0, "hinge"), "palette.png"), t=(0, 1.0, -3.7))
-    node("Lid", "Scene", t=(0, 1.3, -3.9), r=qaxis((1, 0, 0), -18))
-    node("LidShell", "Lid", (box(13, 7.6, 0.7, "shell"), "palette.png"), t=(0, 3.8, 0))
-    node("TopBezel", "Lid", (box(10.6, 6.4, 0.1, "bezel"), "palette.png"), t=(0, 4.0, 0.38))
-    node("TopScreen", "Lid", (quad(9.6, 5.6, "z"), "screen_top.png"), t=(0, 4.0, 0.45))
-    node("LidLogo", "Lid", (quad(1.0, 1.0, "z"), "lid_logo.png"), t=(-5.8, 0.75, 0.38))
-
-
-def add_model_console():
-    """Modèle 3DS (Sketchfab, CC-BY 4.0, voir import_model.py), réorienté et mis à l'échelle."""
-    d = json.load(open(MODEL_JSON))
-    lo, hi = d["bbox"]
-    width = hi[2] - lo[2]                      # la largeur du modèle est sur son axe Z
-    k = 13.0 / width                           # même largeur que l'ancienne console
-    cx, cz = (lo[0] + hi[0]) / 2, (lo[2] + hi[2]) / 2
-    # modèle -> scène : X = z, Y = y, Z = -x (face avant vers la caméra), base posée sur y = 0
-    def conv(p):
-        return ((p[2] - cz) * k, (p[1] - lo[1]) * k, -(p[0] - cx) * k)
-
-    def convn(n):
-        return (n[2], n[1], -n[0])
-
-    node("Console", "Scene")
-    for i, part in enumerate(d["parts"]):
-        pos = [conv(p) for p in part["P"]]
-        nrm = [convn(n) for n in part["N"]]
-        if part["color"] == "SCREENS":
-            mesh = ((pos, nrm, [tuple(u) for u in part["U"]], part["I"]), "screens.png")
-        else:
-            u, v = swatch_uv(part["color"])
-            mesh = ((pos, nrm, [(u, v)] * len(pos), part["I"]), "palette.png")
-        node("Console_%02d" % i, "Console", mesh)
-    # départ du QR : juste au-dessus du centre de l'écran du bas (la plus basse des deux zones d'écran)
-    bottom = min(d["screens"], key=lambda sc: sc["center"][1])
-    c = conv(bottom["center"])
-    QR_START[:] = [c[0], c[1] + 0.3, c[2]]
+PAL = "palette.png"
 
 
 def build_scene():
-    node("Diorama", None)                       # racine, cadrée sur la caméra
-    node("Scene", "Diorama", t=(-3.0, -5.0, 0))  # recentre la scène
-    # --- la console ---
-    if os.path.exists(MODEL_JSON):
-        add_model_console()
-    else:
-        add_box_console()
-    # --- le téléphone qui reçoit la capture ---
-    node("Phone", "Scene", t=(11.0, 6.0, 1.0), r=qaxis((0, 1, 0), -22))
-    node("PhoneBody", "Phone", (box(3.6, 7.0, 0.5, "phone_edge"), "palette.png"))
-    node("PhoneScreen", "Phone", (quad(3.2, 6.4, "z"), "screen_phone.png"), t=(0, 0, 0.26))
-    # --- le QR code qui s'envole ---
-    node("QRCard", "Scene", (quad(2.4, 2.4, "z"), "qr.png"), t=tuple(QR_START), s=(0.01, 0.01, 0.01))
+    node("Banner", None)                         # racine, cadrée sur la caméra
+    node("Scene", "Banner", t=(0, -1.6, 0))       # recentre (la photo monte au-dessus)
+    node("Camera", "Scene")                      # tout l'appareil : tourne doucement
+    node("Squash", "Camera")                     # écrasement au moment du clic
+    # Corps : savon crème + bande corail
+    node("Body", "Squash", (superellipsoid(4.2, 2.7, 1.9, 0.32, "cream"), PAL))
+    node("Band", "Squash", (superellipsoid(4.26, 1.05, 1.96, 0.32, "coral", theta=(-28, 28)), PAL))
+    # Fente d'où sort la photo (sur le dessus)
+    node("Slot", "Squash", (box(3.0, 0.12, 0.5, "lens_dark", center=(0, 2.68, -0.2)), PAL))
+    # Objectif : barillet foncé, bague claire, verre bleu et reflet
+    node("LensBarrel", "Squash", (cylinder(1.75, 1.2, 2.55, "lens_dark"), PAL))
+    node("LensRing", "Squash", (torus(1.75, 0.22, 2.55, "lens_ring"), PAL))
+    node("LensGlass", "Squash", (cylinder(1.35, 2.5, 2.62, "glass", caps=(False, True)), PAL))
+    node("LensShine", "Squash", (superellipsoid(0.38, 0.38, 0.08, 0.9, "glass_light", center=(-0.45, 0.45, 2.66)), PAL))
+    # Flash (en haut à gauche) et déclencheur (dessus, à droite)
+    node("Flash", "Squash", (superellipsoid(0.75, 0.48, 0.25, 0.3, "flash", center=(-2.6, 1.6, 1.85)), PAL))
+    node("Shutter", "Squash", t=(2.6, 2.6, 0.2))
+    node("ShutterButton", "Shutter", (cylinder(0.55, 0.0, 0.42, "coral_dark", axis="y"), PAL))
+    # Petit logo hn sur la face avant (en bas à droite)
+    node("Logo", "Squash", (quad(0.9, 0.9, center=(2.9, -1.55, 1.92)), "lid_logo.png"))
+    # Éclat du flash : étoile qui apparaît au clic
+    node("FlashBurst", "Camera", (star(1.6, 0.6, 0.0, "flash_glow"), PAL), t=(-2.6, 1.6, 2.3), s=(0.01, 0.01, 0.01))
+    # La photo qui sort par le dessus (cadre blanc + image)
+    node("Photo", "Camera", t=(0, 1.2, -0.2), s=(0.01, 0.01, 0.01))
+    node("PhotoFrame", "Photo", (box(2.8, 3.1, 0.12, "white"), PAL))
+    node("PhotoImage", "Photo", (quad(2.4, 2.4, center=(0, 0.2, 0.07)), "photo.png"))
+
+
+ANIMATED = ["Camera", "Squash", "Shutter", "FlashBurst", "Photo"]
 
 
 def smooth(a, b, k):
@@ -188,42 +276,57 @@ def smooth(a, b, k):
     return a + (b - a) * k
 
 
+def bounce(k):
+    """0 -> 1 avec un petit dépassement (effet élastique)."""
+    k = max(0.0, min(1.0, k))
+    return 1 + 2.2 * (k - 1) ** 3 + 1.2 * (k - 1) ** 2 if k < 1 else 1.0
+
+
 def animate(name, t):
     """Pose (T, R, S) d'un nœud animé à l'instant t (secondes, 0..LOOP)."""
-    if name == "Phone":
-        bob = math.sin(t / LOOP * 2 * math.pi) * 0.35
-        r = qmul(qaxis((0, 1, 0), -22), qaxis((0, 0, 1), math.sin(t / LOOP * 2 * math.pi) * 3))
-        # petit « saut » de joie quand le QR arrive
-        hop = 0.5 * math.sin(math.pi * (t - 2.3) / 0.4) if 2.3 <= t <= 2.7 else 0.0
-        return (11.0, 6.0 + bob + hop, 1.0), r, (1, 1, 1)
-    if name == "QRCard":
-        start, end = tuple(QR_START), (11.0, 6.0, 1.6)
-        if t < 0.3:  # sort de l'écran du bas
-            k = t / 0.3
-            return (start[0], smooth(start[1], start[1] + 1.0, k), start[2]), qaxis((1, 0, 0), -90 * (1 - k)), (k, k, k)
-        if t < 2.3:  # vole en arc en tournant
-            k = (t - 0.3) / 2.0
-            e = smooth(0, 1, k)
-            x = start[0] + (end[0] - start[0]) * e
-            z = start[2] + (end[2] - start[2]) * e
-            y = smooth(start[1] + 1.0, end[1], k) + 3.5 * math.sin(math.pi * e)
-            return (x, y, z), qaxis((0, 1, 0), 720 * e), (1, 1, 1)
-        if t < 2.5:  # entre dans le téléphone
-            k = 1 - (t - 2.3) / 0.2
-            k = max(k, 0.01)
-            return end, (0, 0, 0, 1), (k, k, k)
-        return end, (0, 0, 0, 1), (0.01, 0.01, 0.01)  # caché jusqu'à la boucle suivante
+    dt = t - CLICK
+    if name == "Camera":
+        yaw = 22 * math.sin(t / LOOP * 2 * math.pi)
+        tilt = 4 * math.sin(t / LOOP * 4 * math.pi)
+        return (0, 0, 0), qmul(qaxis((0, 1, 0), yaw), qaxis((1, 0, 0), tilt)), (1, 1, 1)
+    if name == "Squash":
+        if 0 <= dt < 0.45:  # écrasé puis rebond
+            k = dt / 0.45
+            sy = 1 - 0.14 * math.sin(math.pi * k) * (1 - k * 0.3)
+            sx = 1 + 0.08 * math.sin(math.pi * k)
+            return (0, 0, 0), (0, 0, 0, 1), (sx, sy, sx)
+        return (0, 0, 0), (0, 0, 0, 1), (1, 1, 1)
+    if name == "Shutter":
+        down = 0.28 if -0.12 <= dt < 0.18 else 0.0
+        return (2.6, 2.6 - down, 0.2), (0, 0, 0, 1), (1, 1, 1)
+    if name == "FlashBurst":
+        if 0 <= dt < 0.35:
+            k = dt / 0.35
+            s = math.sin(math.pi * k) * 1.2 + 0.01
+            return (-2.6, 1.6, 2.3), qaxis((0, 0, 1), 40 * k), (s, s, s)
+        return (-2.6, 1.6, 2.3), (0, 0, 0, 1), (0.01, 0.01, 0.01)
+    if name == "Photo":
+        base, top = 1.2, 4.6
+        if dt < 0.25 or dt >= LOOP - CLICK - 0.05:
+            return (0, base, -0.2), (0, 0, 0, 1), (0.01, 0.01, 0.01)
+        if dt < 1.15:  # sort de la fente avec un petit rebond
+            k = (dt - 0.25) / 0.9
+            y = base + (top - base) * bounce(k)
+            return (0, y, -0.2), (0, 0, 0, 1), (1, 1, 1)
+        if dt < 2.55:  # se balance doucement
+            k = (dt - 1.15) / 1.4
+            return (0, top, -0.2), qaxis((0, 0, 1), 6 * math.sin(k * 3 * math.pi)), (1, 1, 1)
+        k = (dt - 2.55) / max(LOOP - CLICK - 0.05 - 2.55, 0.01)  # disparaît en « pop »
+        s = max(0.01, 1 - k)
+        return (0, top + 0.6 * k, -0.2), (0, 0, 0, 1), (s, s, s)
     return None
 
-
-ANIMATED = ["Phone", "QRCard"]
 
 # ---------------------------------------------------------------------------
 # Cadrage sur la caméra du menu HOME
 
 
 def fit_to_camera(camera_path):
-    """Place la racine devant la caméra, vue de trois quarts par le dessus."""
     cam_t, cam_r, yfov = (0.0, 0.0, 40.0), (0, 0, 0, 1), math.radians(30)
     if camera_path:
         g = json.load(open(camera_path))
@@ -232,16 +335,13 @@ def fit_to_camera(camera_path):
             if "camera" in n:
                 cam_t = tuple(n.get("translation", (0, 0, 0)))
                 cam_r = tuple(n.get("rotation", (0, 0, 0, 1)))
-                p = cams[n["camera"]].get("perspective", {})
-                yfov = p.get("yfov", yfov)
+                yfov = cams[n["camera"]].get("perspective", {}).get("yfov", yfov)
                 break
     fwd = qrot(cam_r, (0, 0, -1))
-    radius = 11.5  # demi-taille de la scène (unités du modèle)
-    dist = radius / math.tan(yfov / 2) * 1.08  # petite marge (zone sûre)
+    radius = 5.0  # demi-hauteur de la scène, photo comprise
+    dist = radius / math.tan(yfov / 2) * 1.12
     center = tuple(cam_t[i] + fwd[i] * dist for i in range(3))
-    # Orientation : la scène fait face à la caméra, inclinée vers elle et tournée de 3/4.
-    tilt = qmul(qaxis((1, 0, 0), 24), qaxis((0, 1, 0), -16))
-    rot = qmul(cam_r, tilt)
+    rot = qmul(cam_r, qaxis((1, 0, 0), 10))  # vue très légèrement plongeante
     return center, rot, (1, 1, 1)
 
 
@@ -252,7 +352,7 @@ def fit_to_camera(camera_path):
 def write_gltf(out_dir, camera_path=None):
     SCENE.clear()
     build_scene()
-    root = next(n for n in SCENE if n["name"] == "Diorama")
+    root = SCENE[0]
     root["t"], root["r"], root["s"] = fit_to_camera(camera_path)
 
     blob = bytearray()
@@ -262,7 +362,7 @@ def write_gltf(out_dir, camera_path=None):
         while len(blob) % 4:
             blob.append(0)
         off = len(blob)
-        blob.extend(struct.pack("<" + fmt * 1, *data) if False else b"".join(struct.pack("<" + fmt, d) for d in data))
+        blob.extend(b"".join(struct.pack("<" + fmt, d) for d in data))
         v = {"buffer": 0, "byteOffset": off, "byteLength": len(blob) - off}
         if target:
             v["target"] = target
@@ -276,24 +376,19 @@ def write_gltf(out_dir, camera_path=None):
     textures = sorted({n["mesh"][1] for n in SCENE if n["mesh"]})
     images = [{"uri": "textures/" + t} for t in textures]
     tex = [{"source": i, "sampler": 0} for i in range(len(textures))]
-    materials = []
-    for t in textures:
-        m = {"name": "mat_" + t.split(".")[0],
-             "pbrMetallicRoughness": {"baseColorTexture": {"index": textures.index(t)},
-                                      "metallicFactor": 0.0, "roughnessFactor": 1.0}}
-        if t == "qr.png":
-            m["doubleSided"] = True
-        materials.append(m)
+    materials = [{"name": "mat_" + t.split(".")[0],
+                  "pbrMetallicRoughness": {"baseColorTexture": {"index": i},
+                                           "metallicFactor": 0.0, "roughnessFactor": 0.45}}
+                 for i, t in enumerate(textures)]
 
     meshes, nodes = [], []
     for n in SCENE:
         nd = {"name": n["name"], "translation": list(n["t"]), "rotation": list(n["r"]), "scale": list(n["s"])}
         if n["mesh"]:
             (pos, nrm, uv, idx), texname = n["mesh"]
-            flat = [c for p in pos for c in p]
             mn = [min(p[i] for p in pos) for i in range(3)]
             mx = [max(p[i] for p in pos) for i in range(3)]
-            ap = add(flat, "f", len(pos), 5126, "VEC3", 34962, (mn, mx))
+            ap = add([c for p in pos for c in p], "f", len(pos), 5126, "VEC3", 34962, (mn, mx))
             an = add([c for p in nrm for c in p], "f", len(nrm), 5126, "VEC3", 34962)
             au = add([c for p in uv for c in p], "f", len(uv), 5126, "VEC2", 34962)
             ai = add(idx, "H", len(idx), 5123, "SCALAR", 34963)
@@ -308,7 +403,6 @@ def write_gltf(out_dir, camera_path=None):
         if kids:
             nodes[i]["children"] = kids
 
-    # Animation : échantillonnée à FPS, boucle de LOOP secondes
     frames = int(LOOP * FPS) + 1
     times = [i / FPS for i in range(frames)]
     at = add(times, "f", frames, 5126, "SCALAR", None, ([0.0], [times[-1]]))
@@ -316,23 +410,17 @@ def write_gltf(out_dir, camera_path=None):
     for name in ANIMATED:
         poses = [animate(name, t) for t in times]
         for path, k, typ in (("translation", 0, "VEC3"), ("rotation", 1, "VEC4"), ("scale", 2, "VEC3")):
-            data = [c for p in poses for c in p[k]]
-            ao = add(data, "f", frames, 5126, typ)
+            ao = add([c for p in poses for c in p[k]], "f", frames, 5126, typ)
             samplers.append({"input": at, "output": ao, "interpolation": "LINEAR"})
             channels.append({"sampler": len(samplers) - 1, "target": {"node": names.index(name), "path": path}})
 
     gltf = {
-        "asset": {"version": "2.0", "generator": "heivoli make_banner.py"},
+        "asset": {"version": "2.0", "generator": "heivoli make_banner.py (appareil photo)"},
         "scene": 0,
-        "scenes": [{"name": "Banner", "nodes": [names.index("Diorama")]}],
-        "nodes": nodes,
-        "meshes": meshes,
-        "materials": materials,
-        "textures": tex,
+        "scenes": [{"name": "Banner", "nodes": [0]}],
+        "nodes": nodes, "meshes": meshes, "materials": materials, "textures": tex,
         "samplers": [{"magFilter": 9729, "minFilter": 9729, "wrapS": 33071, "wrapT": 33071}],
-        "images": images,
-        "accessors": accessors,
-        "bufferViews": views,
+        "images": images, "accessors": accessors, "bufferViews": views,
         "buffers": [{"uri": "banner.bin", "byteLength": len(blob)}],
         "animations": [{"name": "Loop", "samplers": samplers, "channels": channels}],
     }
@@ -349,5 +437,6 @@ if __name__ == "__main__":
     ap.add_argument("--out", default=HERE)
     a = ap.parse_args()
     g = write_gltf(a.out, a.camera)
-    print("banner.gltf : %d nœuds, %d maillages, %d textures, boucle %.1f s"
-          % (len(g["nodes"]), len(g["meshes"]), len(g["images"]), LOOP))
+    tris = sum(accessor["count"] for accessor in g["accessors"] if accessor.get("componentType") == 5123) // 3
+    print("banner.gltf : %d nœuds, %d maillages, ~%d triangles, boucle %.1f s"
+          % (len(g["nodes"]), len(g["meshes"]), tris, LOOP))

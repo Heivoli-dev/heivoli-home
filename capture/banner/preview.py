@@ -122,11 +122,11 @@ if __name__ == "__main__":
     g = mb.write_gltf(HERE, None)
     blob = open(os.path.join(HERE, "banner.bin"), "rb").read()
     cache = {}
-    frames = [render(g, blob, i / 10.0, cache) for i in range(40)]
+    frames = [render(g, blob, i / 10.0, cache) for i in range(int(mb.LOOP * 10))]
     big = [f.resize((W * 2, H * 2), Image.NEAREST) for f in frames]
     big[0].save(os.path.join(HERE, "preview.gif"), save_all=True, append_images=big[1:], duration=100, loop=0)
     strip = Image.new("RGB", (W * 3 + 20, H), (255, 255, 255))
-    for k, t in enumerate((3, 13, 23)):
+    for k, t in enumerate((8, 22, 34)):
         strip.paste(frames[t], (k * (W + 10), 0))
     strip.save(os.path.join(HERE, "preview_strip.png"))
     print("ok")

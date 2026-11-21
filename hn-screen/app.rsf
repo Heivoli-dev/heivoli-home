@@ -43,6 +43,7 @@ AccessControlInfo:
   CanShareDeviceMemory          : true
   RunnableOnSleep               : false
   SpecialMemoryArrange          : true
+  MemoryType                    : Application
   SystemModeExt                 : Legacy
   CpuSpeed                      : 268MHz
   EnableL2Cache                 : false

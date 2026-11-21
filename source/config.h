@@ -5,12 +5,13 @@
 #define APP_VERSION "0.3.1"
 #endif
 
-// Mises à jour publiées dans les Releases GitHub du dépôt Heivoli-dev/heivoli-home.
-// - Stable : fichier latest.txt de la dernière release ("latest").
-// - Bêta   : fichier latest-beta.txt de la release portant le tag "beta".
-#define GITHUB_REPO            "https://github.com/Heivoli-dev/heivoli-home"
-#define UPDATE_MANIFEST_STABLE GITHUB_REPO "/releases/latest/download/latest.txt"
-#define UPDATE_MANIFEST_BETA   GITHUB_REPO "/releases/download/beta/latest-beta.txt"
+// Mises à jour publiées dans le dossier releases/ du dépôt GitHub Heivoli-dev/heivoli-home.
+// - Stable : releases/latest.txt
+// - Bêta   : releases/latest-beta.txt
+// Chaque version a son sous-dossier : releases/vX.Y.Z/
+#define UPDATE_BASE_URL        "https://raw.githubusercontent.com/Heivoli-dev/heivoli-home/main/releases"
+#define UPDATE_MANIFEST_STABLE UPDATE_BASE_URL "/latest.txt"
+#define UPDATE_MANIFEST_BETA   UPDATE_BASE_URL "/latest-beta.txt"
 
 // Certificats racine pour le HTTPS (fichier cacert.pem à mettre dans romfs/).
 #define CA_BUNDLE "romfs:/cacert.pem"

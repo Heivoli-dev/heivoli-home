@@ -32,7 +32,7 @@ def main():
         sys.exit(1)
     version, base = sys.argv[1], sys.argv[2].rstrip("/")
     if base == "github":
-        base = "https://github.com/Heivoli-dev/heivoli-home/releases/download/" + ("beta" if beta else "v" + version)
+        base = "https://raw.githubusercontent.com/Heivoli-dev/heivoli-home/main/releases/v" + version
     notes = sys.argv[3] if len(sys.argv) > 3 else ""
     lines = ["version=" + version]
     for ext in ("3dsx", "cia"):

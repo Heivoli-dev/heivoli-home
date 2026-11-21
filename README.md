@@ -19,15 +19,17 @@ L'étape suivante (remplacer le menu HOME) règle ça.
 
 ## Mises à jour par Wi-Fi (GitHub)
 
-Heivoli et Heivoli Installer cherchent les nouvelles versions dans les **Releases** de ce dépôt :
+Heivoli et Heivoli Installer lisent leurs mises à jour dans le dossier `releases/` de ce dépôt :
 
-- Stable : `latest.txt` de la dernière release (`/releases/latest/download/latest.txt`)
-- Bêta : `latest-beta.txt` de la release au tag `beta`
+- Stable : `releases/latest.txt`
+- Bêta : `releases/latest-beta.txt`
+- Fichiers de chaque version : `releases/vX.Y.Z/` (`heivoli-home.3dsx`, `heivoli-installer.3dsx`, `.cia` si dispo)
 
 Pour publier une version :
 1. Augmente `VERSION_MAJOR/MINOR/MICRO` dans `Makefile` **et** `installer/Makefile`, puis `bash compiler-mac.sh`.
-2. `python3 tools/make_manifest.py X.Y.Z github "Ce qui change"`
-3. Crée une release `vX.Y.Z` avec : `latest.txt`, `heivoli-home.3dsx`, `installer/heivoli-installer.cia`.
+2. Copie les fichiers compilés dans `releases/vX.Y.Z/`.
+3. `python3 tools/make_manifest.py X.Y.Z github "Ce qui change"` puis copie `server/latest.txt` en `releases/latest.txt`.
+4. Commit + push : les consoles trouvent la nouvelle version au prochain démarrage.
 
 ---
 

@@ -11,6 +11,9 @@ typedef enum {
     SHARE_ERROR
 } ShareState;
 
+// Prépare le réseau (sockets + curl) une seule fois.
+bool net_init(void);
+
 // Prépare les images (haut, bas, les deux) puis lance l'envoi sur le site.
 // `top` et `bot` : chemins des BMP (NULL si absent).
 bool share_start(const char *top, const char *bot, bool localOnly);

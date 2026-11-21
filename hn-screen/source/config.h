@@ -26,3 +26,9 @@
 #define LOCAL_PORT 8080
 
 #define CA_BUNDLE "romfs:/cacert.pem"
+
+// Mises à jour automatiques (branche « builds » remplie par GitHub Actions).
+#define UPDATE_BASE     "https://raw.githubusercontent.com/Heivoli-dev/heivoli-home/builds"
+#define UPDATE_MANIFEST UPDATE_BASE "/version.txt"
+#define UPDATE_CIA      UPDATE_BASE "/hn-screen.cia"
+#define APP_TITLE_ID    0x000400000FE5C000ULL

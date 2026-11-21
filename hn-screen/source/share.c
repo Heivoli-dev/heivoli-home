@@ -43,7 +43,7 @@ const char *share_url(void) { return S.url; }
 const char *share_label(void) { return S.label; }
 const char *share_error(void) { return S.error; }
 
-static bool soc_init(void)
+bool net_init(void)
 {
     if (S.socReady) return true;
     S.socBuf = memalign(SOC_ALIGN, SOC_SIZE);
@@ -333,7 +333,7 @@ bool share_start(const char *topPath, const char *botPath, bool localOnly)
         S.state = SHARE_NO_WIFI;
         return false;
     }
-    if (!soc_init()) {
+    if (!net_init()) {
         snprintf(S.error, sizeof(S.error), "Réseau indisponible");
         S.state = SHARE_ERROR;
         return false;
@@ -361,7 +361,7 @@ void share_go_local(void)
         S.state = SHARE_NO_WIFI;
         return;
     }
-    if (!soc_init() || !start_server()) {
+    if (!net_init() || !start_server()) {
         snprintf(S.error, sizeof(S.error), "Impossible d'ouvrir le partage local");
         S.state = SHARE_ERROR;
     }

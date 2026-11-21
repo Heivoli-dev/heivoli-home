@@ -31,6 +31,8 @@ VERSION_MAJOR	:=	1
 VERSION_MINOR	:=	0
 VERSION_MICRO	:=	0
 VERSION		:=	$(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_MICRO)
+# Numéro de build (donné par GitHub Actions) : sert aux mises à jour automatiques.
+BUILD_NUMBER	?=	0
 
 # Outils CIA (à installer à part, voir README) : bannertool et makerom
 BANNERTOOL	?=	bannertool
@@ -43,7 +45,7 @@ CFLAGS	:=	-g -Wall -O2 -mword-relocations \
 			-ffunction-sections \
 			$(ARCH)
 
-CFLAGS	+=	$(INCLUDE) -D__3DS__ -std=gnu11 -DAPP_VERSION=\"$(VERSION)\"
+CFLAGS	+=	$(INCLUDE) -D__3DS__ -std=gnu11 -DAPP_VERSION=\"$(VERSION)\" -DAPP_BUILD=$(BUILD_NUMBER)
 
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++11
 

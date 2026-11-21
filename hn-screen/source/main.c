@@ -4,6 +4,8 @@
 #include "qrcodegen.h"
 #include "share.h"
 #include "shots.h"
+#include "sound.h"
+#include "update.h"
 #include "titles.h"
 #include "ui.h"
 #include <3ds.h>
@@ -13,10 +15,11 @@
 #include <string.h>
 #include <sys/stat.h>
 
-typedef enum { M_ALBUM, M_VIEW, M_SHARE, M_SORT } Mode;
+typedef enum { M_ALBUM, M_VIEW, M_SHARE, M_SORT, M_UPDATE } Mode;
 
 #define MAX_CATS 64
 #define GRID_TOP 58
+#define GRID_PAD 12 // espace entre les onglets et la grille
 #define TH_W 70
 #define TH_H 42
 #define TH_GAP 10
@@ -53,6 +56,9 @@ static int s_sortSel = 0, s_sortIdx[256], s_sortN = 0;
 static float s_sortScroll = 0;
 
 static C2D_SpriteSheet s_sheet = NULL;
+static int s_toast = 0;            // images restantes pour le message « Sons activés / coupés »
+static ShareState s_lastShare = SHARE_IDLE;
+static int s_doneFrames = 0;
 
 // ---------------------------------------------------------------------------
 // Catégories, filtrage et grille
@@ -193,6 +199,7 @@ static void move_vertical(int dir)
 static void set_cat(int k)
 {
     if (k < 0 || k >= s_ncats || k == s_cat) return;
+    sound_play(SND_TAB);
     s_cat = k;
     s_sel = 0;
     s_scroll = 0;
@@ -273,7 +280,7 @@ static void draw_empty_top(void)
     }
     ui_text_center(TOP_W / 2, 150, 0.6f, C_TXT, "Aucune capture pour l'instant");
     ui_text_center(TOP_W / 2, 176, 0.45f, C_TXT2, "En jeu : L + ↓ + Select, puis « Prendre une capture »");
-    draw_status_bar("START : quitter");
+    draw_status_bar("SELECT : sons   START : quitter");
 }
 
 static void draw_top_album(void)
@@ -408,7 +415,7 @@ static void draw_bottom_album(void)
     }
     for (int k = 0; k < s_ncells; k++) {
         Cell *c = &s_cells[k];
-        float y = GRID_TOP + 4 + c->y - s_scroll;
+        float y = GRID_TOP + GRID_PAD + c->y - s_scroll;
         if (y > SCR_H || y + ROW_H < GRID_TOP - 10) continue;
         if (c->shot < 0) {
             ui_text(12, y, 0.42f, C_TXT2, c->label);
@@ -546,6 +553,56 @@ static void draw_bottom_sort(void)
     ui_text(10, 4, 0.52f, C_TXT, "Ranger dans quel jeu ?");
 }
 
+static void draw_bottom_update(void)
+{
+    ui_stripes(BOT_W, SCR_H);
+    ui_rrect(19, 39, 282, 162, 12, C_BORDER);
+    ui_rrect(20, 40, 280, 160, 11, C_WHITE);
+    ui_camera_badge(34, 52, 26);
+    ui_text(70, 54, 0.55f, C_TXT, "Mise à jour");
+    char buf[96];
+    switch (update_state()) {
+    case UPD_INSTALLING: {
+        ui_text(34, 96, 0.45f, C_TXT2, "Téléchargement et installation…");
+        float k = update_progress();
+        ui_rrect(34, 124, 252, 14, 7, COL(0xDC, 0xDC, 0xDC));
+        if (k > 0.03f) ui_rrect_grad(34, 124, 252 * k, 14, 7, C_CYAN_HI, C_CYAN_DK);
+        snprintf(buf, sizeof(buf), "%d %%", (int)(k * 100));
+        ui_text_center(160, 146, 0.45f, C_TXT2, buf);
+        ui_text_wrap(34, 168, 0.38f, C_TXT2, 252, "N'éteins pas la console.");
+        break;
+    }
+    case UPD_DONE:
+        ui_text_wrap(34, 96, 0.5f, C_TXT, 252, "C'est installé !");
+        ui_text_wrap(34, 122, 0.42f, C_TXT2, 252, "Hn screen ! redémarre avec la nouvelle version…");
+        break;
+    case UPD_ERROR:
+        ui_text_wrap(34, 92, 0.48f, C_TXT, 252, "La mise à jour n'a pas marché.");
+        ui_text_wrap(34, 116, 0.38f, C_TXT2, 252, update_error());
+        ui_button(34, 160, 120, 28, G_A " Réessayer", true);
+        ui_button(166, 160, 120, 28, G_B " Plus tard", false);
+        break;
+    default:
+        snprintf(buf, sizeof(buf), "Une nouvelle version de Hn screen ! est prête (build %d).", update_remote_build());
+        ui_text_wrap(34, 92, 0.45f, C_TXT, 252, buf);
+        ui_text_wrap(34, 128, 0.38f, C_TXT2, 252, "Elle s'installe toute seule en quelques secondes.");
+        ui_button(34, 160, 120, 28, G_A " Installer", true);
+        ui_button(166, 160, 120, 28, G_B " Plus tard", false);
+        break;
+    }
+}
+
+static void draw_toast(void)
+{
+    if (s_toast <= 0) return;
+    const char *msg = !sound_available() ? "Son indisponible (dspfirm.cdc absent)" : (sound_enabled() ? "Sons activés" : "Sons coupés");
+    float w = ui_text_width(0.45f, msg) + 28;
+    ui_rrect(BOT_W / 2 - w / 2 - 1, 199, w + 2, 30, 9, C_BORDER);
+    ui_rrect_grad(BOT_W / 2 - w / 2, 200, w, 28, 8, C_WHITE, C_SILVER);
+    ui_text_center(BOT_W / 2, 206, 0.45f, C_TXT, msg);
+    s_toast--;
+}
+
 // ---------------------------------------------------------------------------
 // Actions
 static void open_share(bool localOnly)
@@ -556,6 +613,8 @@ static void open_share(bool localOnly)
     shots_path(s, true, top, sizeof(top));
     shots_path(s, false, bot, sizeof(bot));
     s_mode = M_SHARE;
+    sound_play(SND_OPEN);
+    s_lastShare = SHARE_SENDING;
     // dessine une image « Envoi… » avant le travail (encodage PNG ~ 1/2 s)
     share_start(s->hasTop ? top : NULL, s->hasBot ? bot : NULL, localOnly);
 }
@@ -591,12 +650,14 @@ static void sort_confirm(void)
             for (char *c = out; *c; c++)
                 if (*c == '\t' || *c == '\n') *c = ' ';
             apply_sort(out);
+            sound_play(SND_SUCCESS);
             s_mode = M_ALBUM;
         }
         return;
     }
     if (s_sortSel == 1 && hasRemove) apply_sort("");
     else apply_sort(s_titles[s_sortSel - 1 - (hasRemove ? 1 : 0)].name);
+    sound_play(SND_SUCCESS);
     s_mode = M_ALBUM;
 }
 
@@ -607,7 +668,7 @@ static void open_sort(void)
     s_sortN = shots_session(&L, s_f[s_sel], s_sortIdx, 256);
     s_sortSel = 0;
     s_sortScroll = 0;
-    // on propose d'abord le jeu déjà choisi s'il y en a un
+    sound_play(SND_OPEN);
     s_mode = M_SORT;
 }
 
@@ -636,8 +697,11 @@ int main(void)
     aptHookCookie hookCookie;
     aptHook(&hookCookie, apt_hook, NULL);
     mkdir(DATA_DIR, 0777);
+    sound_init();
 
     rescan();
+    update_check_async();
+    bool updateAsked = false;
     bool needTitles = false;
 
     while (aptMainLoop()) {
@@ -649,7 +713,7 @@ int main(void)
         u32 down = hidKeysDown(), rep = hidKeysDownRepeat();
         touchPosition tp;
         hidTouchRead(&tp);
-        if ((down & KEY_START) && s_mode != M_SORT) break;
+        if ((down & KEY_START) && s_mode != M_SORT && !(s_mode == M_UPDATE && (update_state() == UPD_INSTALLING || update_state() == UPD_DONE))) break;
 
         int before = s_sel;
         switch (s_mode) {
@@ -660,13 +724,20 @@ int main(void)
             if (rep & (KEY_UP | KEY_CPAD_UP)) move_vertical(-1);
             if (down & KEY_R) set_cat(s_cat + 1 < s_ncats ? s_cat + 1 : s_cat);
             if (down & KEY_L) set_cat(s_cat - 1);
-            if ((down & KEY_A) && cur()) s_mode = M_VIEW;
+            if ((down & KEY_A) && cur()) {
+                s_mode = M_VIEW;
+                sound_play(SND_OPEN);
+            }
             if ((down & KEY_Y) && cur()) open_share(false);
             if ((down & KEY_X) && cur() && cur()->src == SRC_ROSALINA) {
                 open_sort();
                 if (s_ntitles < 0) needTitles = true;
             }
-            if (down & KEY_SELECT) rescan();
+            if (down & KEY_SELECT) {
+                sound_set_enabled(!sound_enabled());
+                sound_play(SND_OPEN);
+                s_toast = 100;
+            }
             if (down & KEY_TOUCH) {
                 if (tp.py >= 26 && tp.py < 56) {
                     int k = tab_at(tp.px);
@@ -674,18 +745,23 @@ int main(void)
                 } else if (tp.py >= GRID_TOP) {
                     for (int k = 0; k < s_ncells; k++) {
                         Cell *c = &s_cells[k];
-                        float y = GRID_TOP + 4 + c->y - s_scroll;
+                        float y = GRID_TOP + GRID_PAD + c->y - s_scroll;
                         if (c->shot >= 0 && tp.px >= c->x && tp.px < c->x + TH_W && tp.py >= y && tp.py < y + TH_H) {
                             int p = fpos_of_shot(c->shot);
-                            if (p == s_sel) s_mode = M_VIEW;
-                            else s_sel = p;
+                            if (p == s_sel) {
+                                s_mode = M_VIEW;
+                                sound_play(SND_OPEN);
+                            } else s_sel = p;
                         }
                     }
                 }
             }
             break;
         case M_VIEW:
-            if (down & (KEY_B | KEY_A | KEY_TOUCH)) s_mode = M_ALBUM;
+            if (down & (KEY_B | KEY_A | KEY_TOUCH)) {
+                s_mode = M_ALBUM;
+                sound_play(SND_BACK);
+            }
             if (rep & (KEY_RIGHT | KEY_R)) s_sel = s_sel + 1 < s_nf ? s_sel + 1 : s_sel;
             if (rep & (KEY_LEFT | KEY_L)) s_sel = s_sel > 0 ? s_sel - 1 : 0;
             if (down & KEY_Y) open_share(false);
@@ -694,30 +770,91 @@ int main(void)
             share_poll_fallback();
             if (down & KEY_B || ((down & KEY_TOUCH) && tp.py >= 210 && tp.px < 106)) {
                 share_stop();
+                sound_play(SND_BACK);
                 s_mode = M_ALBUM;
             } else if ((down & KEY_X) || ((down & KEY_TOUCH) && tp.py >= 210 && tp.px >= 110)) {
+                sound_play(SND_TAP);
                 if (share_state() == SHARE_ONLINE) share_go_local();
                 else if (share_state() != SHARE_SENDING) open_share(false);
             }
             break;
+        case M_UPDATE: {
+            UpdateState us = update_state();
+            if ((us == UPD_AVAILABLE || us == UPD_ERROR) && (down & KEY_A)) {
+                sound_play(SND_OPEN);
+                update_install_async();
+            } else if ((us == UPD_AVAILABLE || us == UPD_ERROR) && (down & KEY_B)) {
+                sound_play(SND_BACK);
+                update_dismiss();
+                s_mode = M_ALBUM;
+            } else if ((us == UPD_AVAILABLE || us == UPD_ERROR) && (down & KEY_TOUCH) && tp.py >= 160 && tp.py < 190) {
+                if (tp.px < 160) {
+                    sound_play(SND_OPEN);
+                    update_install_async();
+                } else {
+                    sound_play(SND_BACK);
+                    update_dismiss();
+                    s_mode = M_ALBUM;
+                }
+            }
+            break;
+        }
         case M_SORT: {
             int n = sort_items();
+            int beforeSort = s_sortSel;
             if (rep & (KEY_DOWN | KEY_CPAD_DOWN)) s_sortSel = s_sortSel + 1 < n ? s_sortSel + 1 : s_sortSel;
             if (rep & (KEY_UP | KEY_CPAD_UP)) s_sortSel = s_sortSel > 0 ? s_sortSel - 1 : 0;
             if (rep & KEY_RIGHT) s_sortSel = s_sortSel + 5 < n ? s_sortSel + 5 : n - 1;
             if (rep & KEY_LEFT) s_sortSel = s_sortSel > 5 ? s_sortSel - 5 : 0;
-            if (down & KEY_B) s_mode = M_ALBUM;
-            else if ((down & KEY_A) && s_ntitles >= 0) sort_confirm();
+            if (s_sortSel != beforeSort) sound_play(SND_MOVE);
+            if (down & KEY_B) {
+                s_mode = M_ALBUM;
+                sound_play(SND_BACK);
+            } else if ((down & KEY_A) && s_ntitles >= 0) sort_confirm();
             else if ((down & KEY_TOUCH) && tp.py > 28 && s_ntitles >= 0) {
                 int k = (int)((tp.py - 32 + s_sortScroll) / 38);
                 if (k >= 0 && k < n) {
                     if (k == s_sortSel) sort_confirm();
-                    else s_sortSel = k;
+                    else {
+                        s_sortSel = k;
+                        sound_play(SND_TAP);
+                    }
                 }
             }
             break;
         }
         }
+        if (s_sel != before && (s_mode == M_ALBUM || s_mode == M_VIEW)) sound_play(SND_MOVE);
+
+        // sons de fin de partage
+        if (s_mode == M_SHARE) {
+            ShareState st = share_state();
+            if (st != s_lastShare) {
+                if (st == SHARE_ONLINE || st == SHARE_LOCAL) sound_play(SND_SUCCESS);
+                else if (st == SHARE_ERROR || st == SHARE_NO_WIFI) sound_play(SND_ERROR);
+                s_lastShare = st;
+            }
+        }
+
+        // mise à jour : proposée une fois, quand on est dans l'album
+        UpdateState us = update_state();
+        if (us == UPD_AVAILABLE && !updateAsked && s_mode == M_ALBUM) {
+            updateAsked = true;
+            s_mode = M_UPDATE;
+            sound_play(SND_OPEN);
+        }
+        static bool errSounded = false;
+        if (s_mode == M_UPDATE && us == UPD_ERROR && !errSounded) sound_play(SND_ERROR);
+        errSounded = us == UPD_ERROR;
+        if (s_mode == M_UPDATE && us == UPD_DONE) {
+            if (s_doneFrames == 0) sound_play(SND_SUCCESS);
+            if (++s_doneFrames > 90) {
+                update_relaunch();
+                break;
+            }
+        }
+        if (s_mode == M_UPDATE && us == UPD_IDLE) s_mode = M_ALBUM;
+
         if (s_sel != before) s_selStable = 0;
         else s_selStable++;
 
@@ -725,7 +862,7 @@ int main(void)
         int c = cell_of(s_sel);
         if (c >= 0) {
             float y = s_cells[c].y, target = s_scroll;
-            float viewH = SCR_H - GRID_TOP - 8;
+            float viewH = SCR_H - GRID_TOP - GRID_PAD - 6;
             if (y - target < HEAD_H && (c == 0 || s_cells[c - 1].shot < 0)) target = y - HEAD_H - 2;
             else if (y - target < 4) target = y - 4;
             if (y + TH_H + 8 - target > viewH) target = y + TH_H + 8 - viewH;
@@ -752,7 +889,9 @@ int main(void)
         if (s_mode == M_VIEW) draw_bottom_view();
         else if (s_mode == M_SHARE) draw_bottom_share();
         else if (s_mode == M_SORT) draw_bottom_sort();
+        else if (s_mode == M_UPDATE) draw_bottom_update();
         else draw_bottom_album();
+        draw_toast();
         C3D_FrameEnd(0);
         s_frame++;
 
@@ -766,6 +905,8 @@ int main(void)
         else if (s_selStable >= 4) load_preview(false);
     }
 
+    update_exit();
+    sound_exit();
     share_exit();
     if (s_titles) titles_free(s_titles, s_ntitles);
     gpu_free(&s_prevTop);

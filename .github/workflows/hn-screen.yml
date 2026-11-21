@@ -39,8 +39,8 @@ jobs:
       - name: Compilation
         run: |
           export PATH=/tmp/bin:$PATH
-          make -C hn-screen -j2
-          make -C hn-screen cia
+          make -C hn-screen -j2 BUILD_NUMBER=${{ github.run_number }}
+          make -C hn-screen cia BUILD_NUMBER=${{ github.run_number }}
 
       - uses: actions/upload-artifact@v4
         with:
@@ -57,6 +57,8 @@ jobs:
         run: |
           command -v git >/dev/null || (apt-get update -qq && apt-get install -y -qq git)
           mkdir /tmp/out && cp hn-screen/hn-screen.cia hn-screen/hn-screen.3dsx /tmp/out/
+          V=$(grep -E '^VERSION_(MAJOR|MINOR|MICRO)' hn-screen/Makefile | awk '{print $3}' | paste -sd. -)
+          printf 'build=%s\nversion=%s\n' "${{ github.run_number }}" "$V" > /tmp/out/version.txt
           cd /tmp/out
           git init -q -b builds
           git config user.name "github-actions[bot]"

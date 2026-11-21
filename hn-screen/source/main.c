@@ -15,7 +15,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
-typedef enum { M_ALBUM, M_VIEW, M_SHARE, M_SORT, M_UPDATE } Mode;
+typedef enum { M_ALBUM, M_VIEW, M_SHARE, M_SORT, M_UPDATE, M_CONFIRM } Mode;
 
 #define MAX_CATS 64
 #define GRID_TOP 58
@@ -52,7 +52,7 @@ static u32 s_frame = 0;
 
 static Title *s_titles = NULL;
 static int s_ntitles = -1;
-static int s_sortSel = 0, s_sortIdx[256], s_sortN = 0;
+static int s_sortSel = 0;
 static float s_sortScroll = 0;
 
 static C2D_SpriteSheet s_sheet = NULL;
@@ -303,12 +303,9 @@ static void draw_top_album(void)
     }
 
     const float ix = 270, iw = 122;
-    if (s_mode == M_SORT) {
-        ui_text(ix, 36, 0.45f, C_CYAN_DK, "Ranger");
-        char buf[64];
-        snprintf(buf, sizeof(buf), "%d capture%s", s_sortN, s_sortN > 1 ? "s" : "");
-        ui_text_fit(ix, 54, 0.7f, C_TXT, iw, buf);
-        ui_text_wrap(ix, 84, 0.42f, C_TXT2, iw, s_sortN > 1 ? "Toutes celles prises au même moment vont dans le jeu choisi." : "Choisis le jeu sur l'écran du bas.");
+    if (s_mode == M_SORT || s_mode == M_CONFIRM) {
+        ui_text_fit(ix, 34, 0.45f, s && s->game[0] ? C_TXT2 : C_CYAN_DK, iw, s && s->game[0] ? s->game : "À trier");
+        ui_text_wrap(ix, 56, 0.6f, C_TXT, iw, s_mode == M_CONFIRM ? "Supprimer ?" : "Que faire de cette capture ?");
         draw_status_bar(G_A " Choisir   " G_B " Annuler");
         return;
     }
@@ -328,7 +325,7 @@ static void draw_top_album(void)
     ui_text_fit(ix, 100, 0.42f, C_TXT2, iw, s->src == SRC_SHORTCUT ? "Raccourci L + R + ↓" : "Capture Rosalina");
     ui_button(ix, 128, 118, 28, G_Y " Partager", true);
     ui_text_wrap(ix, 162, 0.38f, C_TXT2, iw, "QR code à scanner avec ton téléphone");
-    draw_status_bar(s->src == SRC_ROSALINA ? G_A " Agrandir  " G_X " Ranger" : G_A " Agrandir");
+    draw_status_bar(G_A " Agrandir  " G_X " Ranger / supprimer");
 }
 
 static void draw_top_view(void)
@@ -515,9 +512,28 @@ static void draw_bottom_share(void)
     else if (st != SHARE_SENDING) ui_button(112, 212, 200, 24, G_X " Réessayer avec le site", false);
 }
 
+// Menu de la touche X : supprimer, ranger dans un jeu, retirer du jeu.
+enum { IT_DELETE, IT_KEYBOARD, IT_REMOVE, IT_TITLE };
+
+static int menu_fixed(int *kinds)
+{
+    Shot *s = cur();
+    int n = 0;
+    if (!s) return 0;
+    if (s->src == SRC_ROSALINA) {
+        if (s->game[0]) kinds[n++] = IT_REMOVE;
+        kinds[n++] = IT_KEYBOARD;
+    }
+    kinds[n++] = IT_DELETE;
+    return n;
+}
+
 static int sort_items(void)
 {
-    return 1 + (cur() && cur()->game[0] ? 1 : 0) + (s_ntitles > 0 ? s_ntitles : 0);
+    int kinds[4];
+    int n = menu_fixed(kinds);
+    if (cur() && cur()->src == SRC_ROSALINA && s_ntitles > 0) n += s_ntitles;
+    return n;
 }
 
 static void draw_bottom_sort(void)
@@ -528,29 +544,55 @@ static void draw_bottom_sort(void)
         ui_text_center(160, 140, 0.45f, C_TXT2, "Chargement des jeux…");
         return;
     }
-    bool hasRemove = cur() && cur()->game[0];
+    int kinds[4];
+    int nf = menu_fixed(kinds);
     int n = sort_items();
+    char buf[96];
     for (int k = 0; k < n; k++) {
         float y = 32 + k * 38 - s_sortScroll;
         if (y < -40 || y > SCR_H) continue;
         bool on = k == s_sortSel;
         if (on) ui_glow(10, y, 300, 32, 6);
-        else {
-            ui_rrect(9, y - 1, 302, 34, 7, C_BORDER);
-        }
+        else ui_rrect(9, y - 1, 302, 34, 7, C_BORDER);
         ui_rrect_grad(10, y, 300, 32, 6, C_WHITE, on ? COL(0xEA, 0xF8, 0xFE) : C_SILVER);
         const char *label;
-        if (k == 0) label = "Autre nom… (clavier)";
-        else if (k == 1 && hasRemove) label = "Remettre dans « À trier »";
-        else {
-            Title *t = &s_titles[k - 1 - (hasRemove ? 1 : 0)];
+        u32 color = C_TXT;
+        float tx = 18;
+        if (k < nf) {
+            switch (kinds[k]) {
+            case IT_DELETE:
+                label = "Supprimer cette capture";
+                color = COL(0xB4, 0x23, 0x23);
+                break;
+            case IT_REMOVE:
+                snprintf(buf, sizeof(buf), "Retirer de « %s »", cur()->game);
+                label = buf;
+                break;
+            default:
+                label = "Autre jeu… (clavier)";
+                break;
+            }
+        } else {
+            Title *t = &s_titles[k - nf];
             if (t->hasIcon) C2D_DrawImageAt(t->icon.img, 14, y + 2, 0.6f, NULL, 28 / 48.0f, 28 / 48.0f);
             label = t->name;
+            tx = 50;
         }
-        ui_text_fit(k >= 1 + (hasRemove ? 1 : 0) ? 50 : 18, y + 8, 0.48f, C_TXT, 250, label);
+        ui_text_fit(tx, y + 8, 0.48f, color, 300 - tx, label);
     }
     ui_white_bar(0, 0, BOT_W, 26);
-    ui_text(10, 4, 0.52f, C_TXT, "Ranger dans quel jeu ?");
+    ui_text(10, 4, 0.52f, C_TXT, cur() && cur()->src == SRC_ROSALINA ? "Ranger dans quel jeu ?" : "Capture");
+}
+
+static void draw_bottom_confirm(void)
+{
+    ui_stripes(BOT_W, SCR_H);
+    ui_rrect(19, 49, 282, 142, 12, C_BORDER);
+    ui_rrect(20, 50, 280, 140, 11, C_WHITE);
+    ui_text(36, 64, 0.55f, C_TXT, "Supprimer cette capture ?");
+    ui_text_wrap(36, 92, 0.42f, C_TXT2, 250, "L'écran du haut et l'écran du bas seront effacés de la carte SD. Impossible de revenir en arrière.");
+    ui_button(36, 148, 116, 28, G_A " Supprimer", true);
+    ui_button(168, 148, 116, 28, G_B " Annuler", false);
 }
 
 static void draw_bottom_update(void)
@@ -619,53 +661,81 @@ static void open_share(bool localOnly)
     share_start(s->hasTop ? top : NULL, s->hasBot ? bot : NULL, localOnly);
 }
 
-static void apply_sort(const char *game)
+static void reselect(const char *keep, int fallback)
 {
-    Shot *s = cur();
-    if (!s || !s_sortN) return;
-    char keep[64];
-    snprintf(keep, sizeof(keep), "%s", s->base);
-    shots_set_game(&L, s_sortIdx, s_sortN, game);
     build_cats();
     build_grid();
     int p = -1;
     for (int k = 0; k < s_nf; k++)
         if (!strcmp(L.items[s_f[k]].base, keep)) p = k;
-    if (p >= 0) s_sel = p;
-    else if (s_sel >= s_nf) s_sel = s_nf ? s_nf - 1 : 0;
+    s_sel = p >= 0 ? p : (fallback < s_nf ? fallback : (s_nf ? s_nf - 1 : 0));
+    if (s_sel < 0) s_sel = 0;
     s_prevFor = -1;
+}
+
+static void apply_sort(const char *game)
+{
+    Shot *s = cur();
+    if (!s) return;
+    char keep[64];
+    snprintf(keep, sizeof(keep), "%s", s->base);
+    int idx = s_f[s_sel];
+    shots_set_game(&L, &idx, 1, game);
+    reselect(keep, s_sel);
+}
+
+static void delete_current(void)
+{
+    Shot *s = cur();
+    if (!s) return;
+    int keepPos = s_sel;
+    gpu_free(&s_prevTop);
+    gpu_free(&s_prevBot);
+    shots_delete(&L, s_f[s_sel]);
+    reselect("", keepPos);
 }
 
 static void sort_confirm(void)
 {
-    bool hasRemove = cur() && cur()->game[0];
-    if (s_sortSel == 0) {
-        SwkbdState kb;
-        char out[64] = "";
-        swkbdInit(&kb, SWKBD_TYPE_NORMAL, 2, 60);
-        swkbdSetHintText(&kb, "Nom du jeu");
-        if (cur() && cur()->game[0]) swkbdSetInitialText(&kb, cur()->game);
-        swkbdSetValidation(&kb, SWKBD_NOTBLANK_NOTEMPTY, 0, 0);
-        if (swkbdInputText(&kb, out, sizeof(out)) == SWKBD_BUTTON_CONFIRM && out[0]) {
-            for (char *c = out; *c; c++)
-                if (*c == '\t' || *c == '\n') *c = ' ';
-            apply_sort(out);
+    int kinds[4];
+    int nf = menu_fixed(kinds);
+    if (s_sortSel < nf) {
+        switch (kinds[s_sortSel]) {
+        case IT_DELETE:
+            sound_play(SND_OPEN);
+            s_mode = M_CONFIRM;
+            return;
+        case IT_REMOVE:
+            apply_sort("");
             sound_play(SND_SUCCESS);
             s_mode = M_ALBUM;
+            return;
+        default: {
+            SwkbdState kb;
+            char out[64] = "";
+            swkbdInit(&kb, SWKBD_TYPE_NORMAL, 2, 60);
+            swkbdSetHintText(&kb, "Nom du jeu");
+            if (cur() && cur()->game[0]) swkbdSetInitialText(&kb, cur()->game);
+            swkbdSetValidation(&kb, SWKBD_NOTBLANK_NOTEMPTY, 0, 0);
+            if (swkbdInputText(&kb, out, sizeof(out)) == SWKBD_BUTTON_CONFIRM && out[0]) {
+                for (char *c = out; *c; c++)
+                    if (*c == '\t' || *c == '\n') *c = ' ';
+                apply_sort(out);
+                sound_play(SND_SUCCESS);
+                s_mode = M_ALBUM;
+            }
+            return;
         }
-        return;
+        }
     }
-    if (s_sortSel == 1 && hasRemove) apply_sort("");
-    else apply_sort(s_titles[s_sortSel - 1 - (hasRemove ? 1 : 0)].name);
+    apply_sort(s_titles[s_sortSel - nf].name);
     sound_play(SND_SUCCESS);
     s_mode = M_ALBUM;
 }
 
 static void open_sort(void)
 {
-    Shot *s = cur();
-    if (!s || s->src != SRC_ROSALINA) return;
-    s_sortN = shots_session(&L, s_f[s_sel], s_sortIdx, 256);
+    if (!cur()) return;
     s_sortSel = 0;
     s_sortScroll = 0;
     sound_play(SND_OPEN);
@@ -729,7 +799,7 @@ int main(void)
                 sound_play(SND_OPEN);
             }
             if ((down & KEY_Y) && cur()) open_share(false);
-            if ((down & KEY_X) && cur() && cur()->src == SRC_ROSALINA) {
+            if ((down & KEY_X) && cur()) {
                 open_sort();
                 if (s_ntitles < 0) needTitles = true;
             }
@@ -799,6 +869,16 @@ int main(void)
             }
             break;
         }
+        case M_CONFIRM:
+            if ((down & KEY_A) || ((down & KEY_TOUCH) && tp.py >= 148 && tp.py < 180 && tp.px < 160)) {
+                delete_current();
+                sound_play(SND_COPY);
+                s_mode = M_ALBUM;
+            } else if ((down & KEY_B) || ((down & KEY_TOUCH) && tp.py >= 148 && tp.py < 180)) {
+                sound_play(SND_BACK);
+                s_mode = M_SORT;
+            }
+            break;
         case M_SORT: {
             int n = sort_items();
             int beforeSort = s_sortSel;
@@ -890,6 +970,7 @@ int main(void)
         else if (s_mode == M_SHARE) draw_bottom_share();
         else if (s_mode == M_SORT) draw_bottom_sort();
         else if (s_mode == M_UPDATE) draw_bottom_update();
+        else if (s_mode == M_CONFIRM) draw_bottom_confirm();
         else draw_bottom_album();
         draw_toast();
         C3D_FrameEnd(0);

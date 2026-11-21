@@ -27,6 +27,8 @@ void shots_path(const Shot *s, bool top, char *out, size_t cap);
 
 // Range des captures dans un jeu (nom vide = retour dans « À trier »).
 void shots_set_game(ShotList *l, const int *idx, int n, const char *game);
+// Efface la capture de la carte SD (haut, bas, vignette) et de la liste.
+void shots_delete(ShotList *l, int i);
 // Captures de la même séance que `i` (écart de moins de 20 min) à ranger avec elle.
 int shots_session(const ShotList *l, int i, int *out, int max);
 

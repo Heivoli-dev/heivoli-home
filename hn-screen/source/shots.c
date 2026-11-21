@@ -219,3 +219,21 @@ void shots_day_label(time_t t, char *out, size_t cap)
     if (a.tm_year == b.tm_year) snprintf(out, cap, "%d %s", a.tm_mday, months[a.tm_mon]);
     else snprintf(out, cap, "%d %s %d", a.tm_mday, months[a.tm_mon], a.tm_year + 1900);
 }
+
+void shots_delete(ShotList *l, int i)
+{
+    if (i < 0 || i >= l->count) return;
+    Shot *s = &l->items[i];
+    char p[200];
+    shots_path(s, true, p, sizeof(p));
+    remove(p);
+    shots_path(s, false, p, sizeof(p));
+    remove(p);
+    snprintf(p, sizeof(p), "%s/%s_top_right.bmp", s->dir, s->base);
+    remove(p);
+    snprintf(p, sizeof(p), "%s/%s.th", CACHE_DIR, s->base);
+    remove(p);
+    gpu_free(&s->thumb);
+    memmove(&l->items[i], &l->items[i + 1], sizeof(Shot) * (l->count - i - 1));
+    l->count--;
+}
